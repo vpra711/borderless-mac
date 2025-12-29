@@ -14,3 +14,4 @@ ABCDEFGHJKMNPQRSTUVXYZ\
 123456789\
 ~!@#$%^*()_-+=:;<,>.?/\\|[]";
 pub const PASSWD_LENGTH: usize = 16;
+pub const PAYLOAD_LENGTH: usize = 64;

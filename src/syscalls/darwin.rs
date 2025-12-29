@@ -71,13 +71,14 @@ pub fn get_screen_size() -> NSRect {
     }
 }
 
-pub fn get_user_name() -> (String, String) {
+pub fn get_process_info() -> (String, String, String) {
 
     unsafe {
         let nsprocess_info_class = CString::new("NSProcessInfo").unwrap();
         let process_info_property = CString::new("processInfo").unwrap();
         let username_property = CString::new("userName").unwrap();
         let full_username_property = CString::new("fullUserName").unwrap();
+        let hostname = CString::new("hostName").unwrap();
         let utf8_property = CString::new("UTF8String").unwrap();
 
         let dispatcher: VoidFunction = std::mem::transmute(objc_msgSend as *const ());
@@ -85,21 +86,22 @@ pub fn get_user_name() -> (String, String) {
         let process_info_receiver = dispatcher(receiver, sel_registerName(process_info_property.as_ptr()));
 
         let username_dispatcher: VoidFunction = std::mem::transmute(objc_msgSend as *const ());
+
         let username_receiver = username_dispatcher(process_info_receiver, sel_registerName(username_property.as_ptr()));
 
         let full_username_receiver = username_dispatcher(process_info_receiver, sel_registerName(full_username_property.as_ptr()));
 
+        let host_name_receiver = username_dispatcher(process_info_receiver, sel_registerName(hostname.as_ptr()));
+
         let utf8_dispatcher: StringFunction = std::mem::transmute(objc_msgSend as *const());
         let username_raw_data = utf8_dispatcher(username_receiver, sel_registerName(utf8_property.as_ptr()));
         let full_username_raw_data = utf8_dispatcher(full_username_receiver, sel_registerName(utf8_property.as_ptr()));
+        let host_name_raw_data = utf8_dispatcher(host_name_receiver, sel_registerName(utf8_property.as_ptr()));
 
         (
             String::from(CStr::from_ptr(username_raw_data).to_str().unwrap()),
-            String::from(CStr::from_ptr(full_username_raw_data).to_str().unwrap())
+            String::from(CStr::from_ptr(full_username_raw_data).to_str().unwrap()),
+            String::from(CStr::from_ptr(host_name_raw_data).to_str().unwrap())
         )
     }
 }
-
-// pub fn get_host_name() -> String {
-    
-// }

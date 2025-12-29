@@ -36,10 +36,23 @@ fn main() {
 fn initial_setup(config: &mut Config) {
     configure_environment(config);
     // init_encryption();
-    let screen_size = syscalls::get_screen_size();
-    println!("{:?}", screen_size);
-    let username = syscalls::get_user_name();
-    println!("{:?}", username);
+    println!("{:?}", config);
+
+    let mut data = Data::default();
+    data.package_type = PackageType::Keyboard;
+    data.message = Message {
+        keyboard_data: KeyboardData {
+            vk: 123,
+            dw_flags: 234
+        }
+    };
+    data.machine_name = config.machine_name.clone();
+    data.print();
+    let byted = data.as_bytes();
+    println!("bytes: {:?}", data.as_bytes());
+    let de = Data::from(&byted).unwrap();
+    de.print();
+    println!("de bytes: {:?}", de.as_bytes());
 }
 
 fn init_encryption(config: &Config) {
@@ -49,7 +62,7 @@ fn init_encryption(config: &Config) {
 }
 
 fn configure_environment(config: &mut Config) {
-    config.user_name = get_user_name().0;
+    config.user_name = get_user_name();
     config.my_key = generate_random_key();
     config.key_generated = true;
     config.machine_name = setup_machine_name_and_id();
@@ -66,14 +79,10 @@ fn generate_random_key() -> String {
     key
 }
 
-// fn generate_iv() -> [u8; 16]{
-//     let mut iv: [u8; 16] = [0; 16];
-//     for x in iv.iter_mut() {
-//         *x =  rand::random();
-//     }
-//     iv
-// }
-
 fn setup_machine_name_and_id() -> String {
     get_host_name()
+}
+
+fn start_service() {
+    
 }
