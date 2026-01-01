@@ -1,5 +1,3 @@
-use crate::constants::*;
-
 #[derive(Default, Debug)]
 pub struct MouseLocation {
 	pub x                       : i32,
@@ -18,18 +16,12 @@ pub struct ScreenSize {
 
 #[derive(Default, Debug)]
 pub struct Config {
-	pub my_key                  : String,
-	pub key_generated           : bool,
-	pub key_corrupted           : bool,
     pub package_sent            : PackageMonitor,
     pub package_received        : PackageMonitor,
     pub package_id              : u32,
-    pub running_as_system       : bool,
-    pub running_w_admin_right   : bool,
     pub user_name               : String,
     pub machine_name            : String, // INFO: also referred as hostname
     pub machines : Vec<MachineInfo>,
-    pub magic_number: u32,
 }
 
 #[derive(Default, Debug)]
@@ -327,6 +319,7 @@ impl Message {
 #[derive(Default, Clone)]
 pub struct Data {
 	// 4 bytes, layout: 0 - 3
+	// byte0 = package type, byte1 = checksum, byte2 + byte3 = magic number
 	pub package_type: PackageType,
 
 	// 4 bytes, layout: 4 - 7
@@ -383,7 +376,7 @@ impl Data {
 	}
 
 	pub fn as_bytes(&self) -> [u8; 64] {
-		let mut bytes = [0u8; PAYLOAD_LENGTH];
+		let mut bytes = [0u8; 64];
 
 		bytes[..4].copy_from_slice(&(self.package_type as u32).to_ne_bytes());
 		bytes[4..8].copy_from_slice(&self.id.to_ne_bytes());

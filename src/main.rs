@@ -1,18 +1,17 @@
-mod constants;
-mod settings;
+#![allow(unused)]
 mod structures;
-mod syscalls;
 mod network;
 mod hashing;
+mod syscalls;
 
 use structures::*;
 use network::*;
-use hashing::*;
+use hashing::Hasher;
 
 fn main() {
     let mut config = Config::default();
-    init_encryption(&mut config);
-    start_listening(&mut config);
+    let hasher = Hasher::from(String::from("asdfgfasdfgfasdf"));
+    start_listening(&mut config, &hasher);
 }
 
 /*

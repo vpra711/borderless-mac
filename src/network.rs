@@ -1,14 +1,7 @@
 // network related
-
-use aes::Aes256;
-use aes::cipher::BlockDecryptMut;
-use aes::cipher::KeyInit;
-use aes::cipher::generic_array::GenericArray;
-
-use crate::constants::*;
 use crate::structures::*;
+use crate::hashing::Hasher;
 use crate::syscalls::*;
-use crate::hashing::*;
 
 use std::io::Read;
 use std::net::Ipv4Addr;
@@ -18,7 +11,9 @@ use std::net::{
     SocketAddr
 };
 
-pub fn start_listening(config: &mut Config) {
+use std::ptr::slice_from_raw_parts;
+
+pub fn start_listening(config: &mut Config, hasher: &Hasher) {
     config.user_name = get_user_name();
     config.package_sent = PackageMonitor::default();
     config.package_received = PackageMonitor::default();
@@ -26,8 +21,8 @@ pub fn start_listening(config: &mut Config) {
 
     // TODO: introduce multithreading to listen for both threads
     let addr = [
-        SocketAddr::from(([0, 0, 0, 0], TCP_PORT_MESSAGE)),
-        SocketAddr::from(([0, 0, 0, 0], TCP_PORT_CLIPBOARD)),
+        SocketAddr::from(([0, 0, 0, 0], 15101)),
+        SocketAddr::from(([0, 0, 0, 0], 15100)),
     ];
 
     let listener = TcpListener::bind(&addr[..]);
@@ -42,48 +37,28 @@ pub fn start_listening(config: &mut Config) {
             dbg!("new tcp connection request rejected.");
             return;
         };
-        handle_tcp_stream(stream);
+        handle_tcp_stream(stream, config, &hasher);
     }
 }
 
-pub fn handle_tcp_stream(stream: &mut TcpStream) {
+pub fn handle_tcp_stream(stream: &mut TcpStream, config: &mut Config, hasher: &Hasher) {
     dbg!("new tcp stream accepted, receiving data");
     let mut received_bytes: [u8; 64];
-    let mut out_black: [u8; 64];
     loop {
         received_bytes = [0; 64];
         match stream.read(&mut received_bytes) {
-            Ok(data) => {
-                println!("{}", data);
+            Ok(bytes_read) => {
+                println!("bytes read: {}", bytes_read);
             },
             Err(error) => {
                 dbg!(error);
+                std::process::exit(1);
             }
         }
 
-        let key = "asdfgfasdfgfasdf".to_string();
-        let mut aes = Aes256::new_from_slice(&generate_secure_key(key));
-        let Ok(aes) = &mut aes else {
-            dbg!("problem in aes512 cipher generation");
-            return;
-        };
+        let mut decrypted_data = hasher.decrypt_data(received_bytes);
+        println!("decrypted data: {:?}", decrypted_data);
 
-        let mut blocks: [GenericArray<u8, _>; 4] = [
-            *GenericArray::from_slice(&received_bytes[0..16]),
-            *GenericArray::from_slice(&received_bytes[16..32]),
-            *GenericArray::from_slice(&received_bytes[32..48]),
-            *GenericArray::from_slice(&received_bytes[48..64]),
-        ];
-
-        aes.decrypt_blocks_mut(&mut blocks);
-        let result: Vec<u8> = blocks.iter().flat_map(|b| b.iter().copied()).collect();
-        println!("result is: {:?}", result);
-        let ptr: *const u8 = result.as_ptr();
-        let package = Data::from(&result.as_chunks::<64>().0[0]).unwrap();
-        package.print();
+        hasher.verify_and_update_package(&mut decrypted_data.as_chunks_mut::<32>().0[0]);
     }
-}
-
-pub fn send_package() {
-	
 }
