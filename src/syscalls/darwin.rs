@@ -81,11 +81,11 @@ pub fn get_process_info() -> (String, String, String) {
         let hostname = CString::new("hostName").unwrap();
         let utf8_property = CString::new("UTF8String").unwrap();
 
-        let dispatcher: VoidFunction = std::mem::transmute(objc_msgSend as *const ());
+        let dispatcher: VoidFunction = std::mem::transmute(objc_msgSend as *const());
         let receiver: VoidPtr = objc_getClass(nsprocess_info_class.as_ptr());
         let process_info_receiver = dispatcher(receiver, sel_registerName(process_info_property.as_ptr()));
 
-        let username_dispatcher: VoidFunction = std::mem::transmute(objc_msgSend as *const ());
+        let username_dispatcher: VoidFunction = std::mem::transmute(objc_msgSend as *const());
 
         let username_receiver = username_dispatcher(process_info_receiver, sel_registerName(username_property.as_ptr()));
 

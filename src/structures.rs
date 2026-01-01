@@ -28,6 +28,8 @@ pub struct Config {
     pub running_w_admin_right   : bool,
     pub user_name               : String,
     pub machine_name            : String, // INFO: also referred as hostname
+    pub machines : Vec<MachineInfo>,
+    pub magic_number: u32,
 }
 
 #[derive(Default, Debug)]
@@ -46,6 +48,13 @@ pub struct PackageMonitor {
     pub clipboard_ask           : u64,
     pub explorer_drag_drop      : u64,
     pub nil                     : u64
+}
+
+#[derive(Default, Debug)]
+pub struct MachineInfo {
+	pub name: String,
+	pub id: Id,
+	pub time: u128,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,7 +140,7 @@ impl Default for PackageType {
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
 pub enum Id {
 	None = 0,
@@ -142,6 +151,18 @@ impl TryFrom<u32> for Id {
 	type Error = &'static str;
 
 	fn try_from(value: u32) -> Result<Self, <Id as TryFrom<u32>>::Error> {
+		match value {
+			0   => Ok(Id::None),
+			255 => Ok(Id::All),
+			_   => Err("unknown value")
+		}
+	}
+}
+
+impl TryFrom<u64> for Id {
+	type Error = &'static str;
+
+	fn try_from(value: u64) -> Result<Self, <Id as TryFrom<u64>>::Error> {
 		match value {
 			0   => Ok(Id::None),
 			255 => Ok(Id::All),
@@ -336,7 +357,8 @@ impl Data {
 
 		let half         = bytes.as_chunks::<32>();
 		let package_info = half.0[0];
-		let machine_name = String::from_utf8(half.0[1].to_vec()).unwrap().trim().to_string();
+		let machine_name = String::new(); // String::from_utf8(half.0[1].to_vec()).unwrap().trim().to_string();
+		// let machine_name = String::from_utf8(half.0[1].to_vec()).unwrap().trim().to_string();
 
 		let message      = package_info.as_chunks::<16>();
 		let meta_data    = message.0[0];
