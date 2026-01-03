@@ -43,9 +43,10 @@ pub fn start_listening(config: &mut Config, hasher: &Hasher) {
 
 pub fn handle_tcp_stream(stream: &mut TcpStream, config: &mut Config, hasher: &Hasher) {
     dbg!("new tcp stream accepted, receiving data");
-    let mut received_bytes: [u8; 64];
+    let mut received_bytes: [u8; 16];
+    let mut package: Vec<u8> = Vec::with_capacity(64);
     loop {
-        received_bytes = [0; 64];
+        received_bytes = [0; 16];
         match stream.read(&mut received_bytes) {
             Ok(bytes_read) => {
                 println!("bytes read: {}", bytes_read);
@@ -57,8 +58,10 @@ pub fn handle_tcp_stream(stream: &mut TcpStream, config: &mut Config, hasher: &H
         }
 
         let mut decrypted_data = hasher.decrypt_data(received_bytes);
-        println!("decrypted data: {:?}", decrypted_data);
-
-        hasher.verify_and_update_package(&mut decrypted_data.as_chunks_mut::<32>().0[0]);
+        package.append(&mut decrypted_data.to_vec());
+        if package.len() > 31 {
+            hasher.verify_and_update_package(&mut package.as_chunks_mut::<32>().0[0]);
+            package.drain(..31);
+        }
     }
 }
