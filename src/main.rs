@@ -10,8 +10,8 @@ use hashing::Hasher;
 
 fn main() {
     let mut config = Config::default();
-    let hasher = Hasher::from(String::from("asdfgfasdfgfasdf"));
-    start_listening(&mut config, &hasher);
+    let mut hasher = Hasher::from(String::from("asdfasdfasdfasdf"));
+    start_listening(&mut config, &mut hasher);
 }
 
 /*

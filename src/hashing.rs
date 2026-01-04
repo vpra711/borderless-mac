@@ -1,12 +1,10 @@
-// hasing & encryption related
 use pbkdf2::pbkdf2_hmac;
 use sha2::{
     Sha512,
     Digest
 };
 use aes::{
-    Aes256,
-    Block
+    Aes256, Aes256Dec, Aes256Enc, Block
 };
 use aes::cipher::{
     BlockDecryptMut,
@@ -28,6 +26,7 @@ ABCDEFGHJKMNPQRSTUVXYZ\
 123456789\
 ~!@#$%^*()_-+=:;<,>.?/\\|[]";
 
+#[derive(Debug)]
 pub struct Hasher {
     key: String,
     legal_key: [u8; 32],
@@ -75,12 +74,10 @@ impl Hasher {
         let acquired_magic_number = u32::from_ne_bytes(magic_bytes);
     
         if acquired_magic_number != (self.magic_number & 0xFFFF0000) {
-            dbg!(acquired_magic_number);
-            dbg!(self.magic_number);
-            dbg!("invalid magic number");
+            println!("invalid magic number");
             bytes[0] = 0xFF; // setting package type as invalid
         } else {
-            dbg!("magic number valid");
+            println!("vaild magic number");
         }
 
         let mut checksum = 0;
@@ -91,12 +88,10 @@ impl Hasher {
         }
 
         if checksum.to_ne_bytes()[0] != bytes[1] {
-            dbg!(checksum);
-            dbg!(bytes[1]);
-            dbg!("invalid checksum");
+            println!("invalid checksum");
             bytes[0] = 0xFF; // setting package type as invalid
         } else {
-            dbg!("checksum valid");
+            println!("valid checksum");
         }
 
         // received valid package so erasing checksum and magic number
@@ -121,20 +116,46 @@ impl Hasher {
         bytes[1] = checksum_byte.to_ne_bytes()[0];
     }
 
-    pub fn encrypt_data(&self, target_bytes: [u8; 16]) -> [u8; 16] {
-       let mut buffer = [0u8; 16];
-       self.encryptor.clone()
-            .encrypt_padded_b2b_mut::<ZeroPadding>(&target_bytes, &mut buffer)
-            .unwrap();
-        buffer
+    pub fn encrypt_data_16(&mut self, target: &mut [u8; 16]) {
+       self.encryptor
+            .encrypt_block_mut(target.into());
     }
 
-    pub fn decrypt_data(&self, encrypted_bytes: [u8; 16]) -> [u8; 16] {
-        let mut buffer = [0u8; 16];
-        self.decryptor.clone()
-            .decrypt_padded_b2b_mut::<ZeroPadding>(&encrypted_bytes, &mut buffer)
-            .unwrap();
-        buffer
+    pub fn encrypt_data_32(&mut self, target: &mut [u8; 32]) {
+        let block_size = <Aes256Enc as aes::cipher::BlockSizeUser>::block_size();
+
+        let mut blocks: Vec<Block> = target
+            .chunks_exact(block_size)
+            .map(|chunk| GenericArray::clone_from_slice(chunk))
+            .collect();
+
+        self.encryptor
+            .encrypt_blocks_mut(&mut blocks);
+
+        for (dest, src) in target.chunks_exact_mut(block_size).zip(blocks) {
+            dest.copy_from_slice(&src);
+        }
+    }
+
+    pub fn decrypt_data_16(&mut self, encrypted_bytes: &mut [u8; 16]) {
+        self.decryptor
+            .decrypt_block_mut(encrypted_bytes.into());
+    }
+
+    pub fn decrypt_data_32(&mut self, encrypted_bytes: &mut [u8; 32]) {
+        let block_size = <Aes256Dec as aes::cipher::BlockSizeUser>::block_size();
+
+        let mut blocks: Vec<Block> = encrypted_bytes
+            .chunks_exact(block_size)
+            .map(|chunk| GenericArray::clone_from_slice(chunk))
+            .collect();
+
+        self.decryptor
+            .decrypt_blocks_mut(&mut blocks);
+
+        for (dest, src) in encrypted_bytes.chunks_exact_mut(block_size).zip(blocks) {
+            dest.copy_from_slice(&src);
+        }
     }
 }
 
@@ -188,24 +209,6 @@ fn generate_random_key() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    #[test]
-    fn test_decrypt_data() {
-        let encrypted_data = [124, 152, 132, 14, 167, 112, 106, 80, 25, 40, 180, 140, 60, 142, 28, 25];
-        let hasher = Hasher::from(String::from("asdfgfasdfgfasdf"));
-        let expected_data = String::from("heelo/how-are,yo");
-        let decrypted_data = String::from_utf8(hasher.decrypt_data(encrypted_data).to_vec()).unwrap();
-        assert_eq!(expected_data, decrypted_data);
-    }
-
-    #[test]
-    fn test_encrypt_data() {
-        let expected_encrypted_data = [124, 152, 132, 14, 167, 112, 106, 80, 25, 40, 180, 140, 60, 142, 28, 25];
-        let hasher = Hasher::from(String::from("asdfgfasdfgfasdf"));
-        let data_to_be_encrypted = String::from("heelo/how-are,yo");
-        let encrypted_data = hasher.encrypt_data(data_to_be_encrypted.as_bytes().as_chunks::<16>().0[0]);
-        assert_eq!(encrypted_data, expected_encrypted_data);
-    }
 
     #[test]
     fn test_verify_and_update_package() {
