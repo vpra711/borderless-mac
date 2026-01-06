@@ -11,8 +11,6 @@ use std::net::{
     SocketAddr
 };
 
-use std::ptr::slice_from_raw_parts;
-
 pub fn start_listening(config: &mut Config, hasher: &mut Hasher) {
     config.user_name = get_user_name();
     config.package_sent = PackageMonitor::default();
@@ -31,7 +29,6 @@ pub fn start_listening(config: &mut Config, hasher: &mut Hasher) {
         return;
     };
     
-    println!("listening on");
     for mut tcp_stream in &mut tcp_streams.incoming() {
         let Ok(stream) = &mut tcp_stream else {
             println!("new tcp connection request rejected.");
@@ -43,20 +40,27 @@ pub fn start_listening(config: &mut Config, hasher: &mut Hasher) {
 
 pub fn handle_tcp_stream(stream: &mut TcpStream, hasher: &mut Hasher) {
     println!("new tcp stream accepted, receiving data");
-    let mut received_bytes: [u8; 32];
+    let mut received_bytes: [u8; 64];
     let mut ignore = [0u8; 16];
     stream.read_exact(&mut ignore);
     hasher.decrypt_data_16(&mut ignore);
     loop {
-        received_bytes = [0; 32];
-        match stream.read_exact(&mut received_bytes) {
+        received_bytes = [0; 64];
+        match stream.read_exact(&mut received_bytes[..32]) {
             Ok(bytes_read) => {},
             Err(error) => {
                 println!("{}", error);
                 std::process::exit(1);
             }
         }
-        hasher.decrypt_data_32(&mut received_bytes);
-        hasher.verify_and_update_package(&mut received_bytes);
+        hasher.decrypt_data_32(&mut received_bytes.as_chunks_mut::<32>().0[0]);
+        hasher.verify_and_update_package(&mut received_bytes.as_chunks_mut::<32>().0[0]);
+        let data = Data::from(&received_bytes);
+
+        if let Some(package_type) = data.package_type {
+            if package_type == PackageType::Handshake {
+                println!("hand shaking");
+            }
+        }
     }
 }

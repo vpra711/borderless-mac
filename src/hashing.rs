@@ -74,12 +74,8 @@ impl Hasher {
         let acquired_magic_number = u32::from_ne_bytes(magic_bytes);
     
         if acquired_magic_number != (self.magic_number & 0xFFFF0000) {
-            println!("invalid magic number");
             bytes[0] = 0xFF; // setting package type as invalid
-        } else {
-            println!("vaild magic number");
         }
-
         let mut checksum = 0;
         for byte in &bytes[2..] {
             let mut calculated_byte = [0u8; 4];
@@ -88,12 +84,8 @@ impl Hasher {
         }
 
         if checksum.to_ne_bytes()[0] != bytes[1] {
-            println!("invalid checksum");
             bytes[0] = 0xFF; // setting package type as invalid
-        } else {
-            println!("valid checksum");
         }
-
         // received valid package so erasing checksum and magic number
         bytes[3] = 0;
         bytes[2] = 0;

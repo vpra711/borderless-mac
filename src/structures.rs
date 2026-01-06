@@ -49,7 +49,7 @@ pub struct MachineInfo {
 	pub time: u128,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u32)]
 pub enum PackageType {
     Invalid = 0xFF,
@@ -200,7 +200,7 @@ pub struct MouseData {
 }
 
 impl MouseData {
-	fn from(bytes: [u8; 16]) -> MouseData {
+	fn from(bytes: &[u8; 16]) -> MouseData {
 		MouseData {
 			x: i32::from_ne_bytes(bytes[..4].try_into().unwrap()),
 			y: i32::from_ne_bytes(bytes[4..8].try_into().unwrap()),
@@ -248,69 +248,54 @@ pub struct MachineId {
 	pub machine4: Id,
 }
 
-impl Default for Message {
-	fn default() -> Message {
-		Message {
-			date_time: 9999999999999
-		}
-	}
-}
-
 #[derive(Clone, Copy)]
-pub union Message {
-	pub date_time: u64,
-	pub keyboard_data: KeyboardData,
-	pub mouse_data: MouseData,
-	pub clipboard_action: ClipboardPostAction
+pub enum Message {
+	DateTime(u64),
+	KeyboardMsg(KeyboardData),
+	MouseMsg(MouseData),
+	ClipboardMsg(ClipboardPostAction)
 }
 
 impl Message {
-	fn from(bytes: &[u8; 16]) -> Message {
-		unsafe {
-			let ptr: *const u8 = bytes.first().unwrap();
-			let message: *const Message = ptr as *const Message;
-			*message
-		}
-	}
-
-	fn as_bytes(&self) -> [u8; 16] {
-		let mut bytes = [0u8; 16];
-		unsafe {
-			let ptr: *const Message = self;
-			let raw_bytes = std::slice::from_raw_parts(ptr as *const u8, std::mem::size_of::<Message>());
-			bytes.copy_from_slice(raw_bytes);
-			bytes
-		}
-	}
-
-	fn as_string(&self, package_type: PackageType) -> String {
-		// close eyes and cast
+	pub fn from(bytes: [u8; 16], package_type: PackageType) -> Option<Message> {
+		// TODO: have to check for byte vailidity, anyway for now just casting.
 		match package_type {
 			PackageType::Keyboard => {
-				unsafe {
-					let mut value = String::new();
-					value.push_str("vk: ");
-					value.push_str(&self.keyboard_data.vk.to_string());
-					value.push_str(", dw_flags: ");
-					value.push_str(&self.keyboard_data.dw_flags.to_string());
-					value
-				}
+				Some(Message::KeyboardMsg(KeyboardData::from(&bytes)))
 			},
-			PackageType::Mouse | PackageType::NextMachine => {
-				unsafe {
-					let mut value = String::new();
-					value.push_str("x: ");
-					value.push_str(&self.mouse_data.x.to_string());
-					value.push_str(", y: ");
-					value.push_str(&self.mouse_data.y.to_string());
-					value.push_str(", wheel_delta: ");
-					value.push_str(&self.mouse_data.wheel_delta.to_string());
-					value.push_str(", dw_flags: ");
-					value.push_str(&self.mouse_data.dw_flags.to_string());
-					value
-				}
+			PackageType::Mouse => {
+				Some(Message::MouseMsg(MouseData::from(&bytes)))
 			},
-			_ => String::from("message: none")
+			_ => None
+		}
+	}
+
+	pub fn as_bytes(&self) -> [u8; 16] {
+		match self {
+			Message::DateTime(value) => {
+				let mut bytes = [0u8; 16];
+				bytes[..8].copy_from_slice(&value.to_ne_bytes());
+				bytes
+			},
+			Message::KeyboardMsg(value) => {
+				let mut bytes = [0u8; 16];
+				bytes[..4].copy_from_slice(&value.vk.to_ne_bytes());
+				bytes[4..8].copy_from_slice(&value.dw_flags.to_ne_bytes());
+				bytes
+			},
+			Message::MouseMsg(value) => {
+				let mut bytes = [0u8; 16];
+				bytes[..4].copy_from_slice(&value.x.to_ne_bytes());
+				bytes[4..8].copy_from_slice(&value.y.to_ne_bytes());
+				bytes[8..12].copy_from_slice(&value.wheel_delta.to_ne_bytes());
+				bytes[12..16].copy_from_slice(&value.dw_flags.to_ne_bytes());
+				bytes
+			},
+			Message::ClipboardMsg(value) => {
+				let mut bytes = [0u8; 16];
+				bytes[..4].copy_from_slice(&(value.clone() as u32).to_ne_bytes());
+				bytes
+			},
 		}
 	}
 }
@@ -320,90 +305,108 @@ impl Message {
 pub struct Data {
 	// 4 bytes, layout: 0 - 3
 	// byte0 = package type, byte1 = checksum, byte2 + byte3 = magic number
-	pub package_type: PackageType,
+	pub package_type: Option<PackageType>,
 
 	// 4 bytes, layout: 4 - 7
 	pub id: u32,
 
 	// 4 bytes, layout: 8 - 11
-	pub src: Id,
+	pub src: Option<Id>,
 
 	// 4 bytes, layout: 12 - 15
-	pub dest: Id,
+	pub dest: Option<Id>,
 
 	// 16 byte union, layout: 16 - 31
 	// originally the developer used explicit layout on struct
 	// because csharp does not support unions
-	// TODO: convert to enum
-	pub message: Message,
+	pub message: Option<Message>,
 
-	// originally 4 * i64, the machine name was splited into 4 parts
-	// since sending the bytes in steam, we dont have to split it
-	// in the struct itself. see serializing.
-	// assumed max of 32 character, > 32 will be stripped
 	// layout: 32 - 63
-	pub machine_name: String
+	machine_name_p1: u64,
+	machine_name_p2: u64,
+	machine_name_p3: u64,
+	machine_name_p4: u64
 }
 
 impl Data {
-	pub fn from(bytes: &[u8; 64]) -> Result<Self, &str> {
+	pub fn from(bytes: &[u8; 64]) -> Self {
 
-		let half         = bytes.as_chunks::<32>();
-		let package_info = half.0[0];
-		let machine_name = String::new(); // String::from_utf8(half.0[1].to_vec()).unwrap().trim().to_string();
-		// let machine_name = String::from_utf8(half.0[1].to_vec()).unwrap().trim().to_string();
+		let (package_type, rest) = bytes.split_first_chunk::<4>().unwrap();
+		let (id, rest) = rest.split_first_chunk::<4>().unwrap();
+		let (src, rest) = rest.split_first_chunk::<4>().unwrap();
+		let (dest, rest) = rest.split_first_chunk::<4>().unwrap();
+		let (message, rest) = rest.split_first_chunk::<16>().unwrap();
 
-		let message      = package_info.as_chunks::<16>();
-		let meta_data    = message.0[0];
-		let message      = message.0[1];
+		let mut data = Self::default();
 
-		let meta_data    = meta_data.as_chunks::<4>();
-		let package_type = u32::from_ne_bytes(meta_data.0[0]);
-		let id           = u32::from_ne_bytes(meta_data.0[1]);
-		let src          = u32::from_ne_bytes(meta_data.0[2]);
-		let dest         = u32::from_ne_bytes(meta_data.0[3]);
+		let package_type = PackageType::try_from(u32::from_ne_bytes(package_type.to_owned()));
+		if let Ok(package_type) = package_type {
+			data.package_type = Some(package_type);
+			data.message = Message::from(message.clone(), package_type);
+		} else {
+			data.message = None;
+		}
 
-		Ok(
-			Self {
-				package_type: PackageType::try_from(package_type).unwrap(),
-				id: id,
-				src: Id::try_from(src).unwrap(),
-				dest: Id::try_from(dest).unwrap(),
-				message: Message::from(&message),
-				machine_name: machine_name
-			}
-		)
+		data.id = u32::from_ne_bytes(id.clone());
+		
+		let src = Id::try_from(u32::from_ne_bytes(src.clone()));
+		if let Ok(src) = src {
+			data.src = Some(src);
+		}
+
+		let dest = Id::try_from(u32::from_ne_bytes(dest.clone()));
+		if let Ok(dest) = dest {
+			data.dest = Some(dest);
+		}
+
+		let mut machine_name = [0u8; 8];
+		machine_name.copy_from_slice(bytes[32..40].as_ref());
+		data.machine_name_p1 = u64::from_ne_bytes(machine_name);
+		machine_name.copy_from_slice(bytes[40..48].as_ref());
+		data.machine_name_p2 = u64::from_ne_bytes(machine_name);
+		machine_name.copy_from_slice(bytes[48..56].as_ref());
+		data.machine_name_p3 = u64::from_ne_bytes(machine_name);
+		machine_name.copy_from_slice(bytes[56..].as_ref());
+		data.machine_name_p4 = u64::from_ne_bytes(machine_name);
+
+		data
 	}
 
 	pub fn as_bytes(&self) -> [u8; 64] {
 		let mut bytes = [0u8; 64];
 
-		bytes[..4].copy_from_slice(&(self.package_type as u32).to_ne_bytes());
-		bytes[4..8].copy_from_slice(&self.id.to_ne_bytes());
-		bytes[8..12].copy_from_slice(&(self.src as u32).to_ne_bytes());
-		bytes[12..16].copy_from_slice(&(self.dest as u32).to_ne_bytes());
-		bytes[16..32].copy_from_slice(&self.message.as_bytes());
+		if let Some(package_type) = self.package_type {
+			bytes[..4].copy_from_slice(&(package_type as u32).to_ne_bytes().as_ref());
+		}
+		
+		bytes[4..8].copy_from_slice(&self.id.to_ne_bytes().as_ref());
 
-		bytes[32..].fill(b' ');
-		let machine_name = self.machine_name.as_bytes().get(..32).unwrap_or(self.machine_name.as_bytes());
-		bytes[32..(32 + machine_name.len())].copy_from_slice(machine_name);
+		if let Some(src) = self.src {
+			bytes[8..12].copy_from_slice(&(src as u32).to_ne_bytes().as_ref());
+		}
+
+		if let Some(dest) = self.dest {
+			bytes[12..16].copy_from_slice(&(dest as u32).to_ne_bytes().as_ref());
+		}
+
+		if let Some(message) = self.message {
+			bytes[16..32].copy_from_slice(&message.as_bytes().as_ref());
+		}
+
+		bytes[32..40].copy_from_slice(self.machine_name_p1.to_ne_bytes().as_ref());
+		bytes[40..48].copy_from_slice(self.machine_name_p2.to_ne_bytes().as_ref());
+		bytes[48..56].copy_from_slice(self.machine_name_p3.to_ne_bytes().as_ref());
+		bytes[56..].copy_from_slice(self.machine_name_p4.to_ne_bytes().as_ref());
+
 		bytes
 	}
 
-	pub fn print(&self) {
-		println!(
-			"type        : {:0?}
-			id           : {:1?}
-			src          : {:2?}
-			dest         : {:3?}
-			message      : {:4?}
-			machine_name : {:5?}",
-			self.package_type,
-			self.id,
-			self.src,
-			self.dest,
-			self.message.as_string(self.package_type),
-			self.machine_name
-		)
+	pub fn machine_name(&self) -> Option<String> {
+		let Ok(machine_name_p1) = String::from_utf8(self.machine_name_p1.to_ne_bytes().into()) else { return None; };
+		let Ok(machine_name_p2) = String::from_utf8(self.machine_name_p2.to_ne_bytes().into()) else { return None; };
+		let Ok(machine_name_p3) = String::from_utf8(self.machine_name_p3.to_ne_bytes().into()) else { return None; };
+		let Ok(machine_name_p4) = String::from_utf8(self.machine_name_p4.to_ne_bytes().into()) else { return None; };
+		let mut machine_name = machine_name_p1 + machine_name_p2.as_ref() + machine_name_p3.as_ref() + machine_name_p4.as_ref();
+		Some(machine_name.trim().to_string())
 	}
 }
