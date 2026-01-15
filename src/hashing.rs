@@ -66,6 +66,16 @@ impl Hasher {
         }
     }
 
+    pub fn update_with(&mut self, key: String) {
+        let byte_key: [u8; 16] = key.as_bytes().try_into().expect("invalid key length");
+        let legal_key = generate_legal_key(&byte_key);
+        self.key = key;
+        self.legal_key = legal_key;
+        self.magic_number = generate_24bit_hash(&byte_key);
+        self.encryptor = Aes256Encoder::new(legal_key.as_slice().into(), INITIAL_VECTOR.as_slice().into());
+        self.decryptor = Aes256Decoder::new(legal_key.as_slice().into(), INITIAL_VECTOR.as_slice().into());
+    }
+
     // verify checksum and retrieve embbed magic data
     pub fn verify_and_update_package(&self, bytes: &mut [u8; 32]) {
         let mut magic_bytes = [0u8; 4];
@@ -75,6 +85,7 @@ impl Hasher {
     
         if acquired_magic_number != (self.magic_number & 0xFFFF0000) {
             bytes[0] = 0xFF; // setting package type as invalid
+            eprintln!("error: invalid magic number - setting package type as invalid");
         }
         let mut checksum = 0;
         for byte in &bytes[2..] {
@@ -85,8 +96,10 @@ impl Hasher {
 
         if checksum.to_ne_bytes()[0] != bytes[1] {
             bytes[0] = 0xFF; // setting package type as invalid
+            eprintln!("error: invalid checksum - setting package type as invalid");
         }
-        // received valid package so erasing checksum and magic number
+
+        // erasing checksum and magic number
         bytes[3] = 0;
         bytes[2] = 0;
         bytes[1] = 0;
@@ -108,12 +121,7 @@ impl Hasher {
         bytes[1] = checksum_byte.to_ne_bytes()[0];
     }
 
-    pub fn encrypt_data_16(&mut self, target: &mut [u8; 16]) {
-       self.encryptor
-            .encrypt_block_mut(target.into());
-    }
-
-    pub fn encrypt_data_32(&mut self, target: &mut [u8; 32]) {
+    pub fn encrypt_data(&mut self, target: &mut [u8]) {
         let block_size = <Aes256Enc as aes::cipher::BlockSizeUser>::block_size();
 
         let mut blocks: Vec<Block> = target
@@ -129,12 +137,7 @@ impl Hasher {
         }
     }
 
-    pub fn decrypt_data_16(&mut self, encrypted_bytes: &mut [u8; 16]) {
-        self.decryptor
-            .decrypt_block_mut(encrypted_bytes.into());
-    }
-
-    pub fn decrypt_data_32(&mut self, encrypted_bytes: &mut [u8; 32]) {
+    pub fn decrypt_data(&mut self, encrypted_bytes: &mut [u8]) {
         let block_size = <Aes256Dec as aes::cipher::BlockSizeUser>::block_size();
 
         let mut blocks: Vec<Block> = encrypted_bytes

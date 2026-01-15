@@ -1,3 +1,6 @@
+use crate::Hasher;
+use std::net::TcpStream;
+
 #[derive(Default, Debug)]
 pub struct MouseLocation {
 	pub x                       : i32,
@@ -15,13 +18,17 @@ pub struct ScreenSize {
 }
 
 #[derive(Default, Debug)]
-pub struct Config {
+pub struct Stats {
     pub package_sent            : PackageMonitor,
     pub package_received        : PackageMonitor,
-    pub package_id              : u32,
+}
+
+#[derive(Default, Debug)]
+pub struct Config {
     pub user_name               : String,
     pub machine_name            : String, // INFO: also referred as hostname
-    pub machines : Vec<MachineInfo>,
+    pub machine_id: u32,
+    pub key: String,
 }
 
 #[derive(Default, Debug)]
@@ -39,18 +46,26 @@ pub struct PackageMonitor {
     pub clipboard_drag_drop_end : u64,
     pub clipboard_ask           : u64,
     pub explorer_drag_drop      : u64,
-    pub nil                     : u64
+    pub nil                     : u64,
+    pub invalid: u64
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct MachineInfo {
 	pub name: String,
-	pub id: Id,
+	pub id: u32,
 	pub time: u128,
+	pub hasher: Hasher,
+	pub stream: TcpStream
+}
+
+pub enum SocketStatus {
+	Connected,
+	Disconnected
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum PackageType {
     Invalid = 0xFF,
     Error = 0xFE,
@@ -86,10 +101,10 @@ pub enum PackageType {
     // matrixTwoRowFlag = 4,
 }
 
-impl TryFrom<u32> for PackageType {
+impl TryFrom<i32> for PackageType {
 	type Error = &'static str;
 
-	fn try_from(value: u32) -> Result<PackageType, <PackageType as TryFrom<u32>>::Error> {
+	fn try_from(value: i32) -> Result<PackageType, <PackageType as TryFrom<i32>>::Error> {
 		match value {
 		    0xFF => Ok(PackageType::Invalid), 
 		    0xFE => Ok(PackageType::Error), 
@@ -129,43 +144,6 @@ impl TryFrom<u32> for PackageType {
 impl Default for PackageType {
 	fn default() -> PackageType {
 		PackageType::Hi
-	}
-}
-
-#[derive(PartialEq, Debug, Clone, Copy)]
-#[repr(u32)]
-pub enum Id {
-	None = 0,
-	All = 255
-}
-
-impl TryFrom<u32> for Id {
-	type Error = &'static str;
-
-	fn try_from(value: u32) -> Result<Self, <Id as TryFrom<u32>>::Error> {
-		match value {
-			0   => Ok(Id::None),
-			255 => Ok(Id::All),
-			_   => Err("unknown value")
-		}
-	}
-}
-
-impl TryFrom<u64> for Id {
-	type Error = &'static str;
-
-	fn try_from(value: u64) -> Result<Self, <Id as TryFrom<u64>>::Error> {
-		match value {
-			0   => Ok(Id::None),
-			255 => Ok(Id::All),
-			_   => Err("unknown value")
-		}
-	}
-}
-
-impl Default for Id {
-	fn default() -> Id {
-		Id::None
 	}
 }
 
@@ -240,12 +218,12 @@ impl TryFrom<u32> for ClipboardPostAction {
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct MachineId {
-	pub machine1: Id,
-	pub machine2: Id,
-	pub machine3: Id,
-	pub machine4: Id,
+	pub machine1: u32,
+	pub machine2: u32,
+	pub machine3: u32,
+	pub machine4: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -253,7 +231,8 @@ pub enum Message {
 	DateTime(u64),
 	KeyboardMsg(KeyboardData),
 	MouseMsg(MouseData),
-	ClipboardMsg(ClipboardPostAction)
+	ClipboardMsg(ClipboardPostAction),
+	Machines(MachineId)
 }
 
 impl Message {
@@ -266,6 +245,26 @@ impl Message {
 			PackageType::Mouse => {
 				Some(Message::MouseMsg(MouseData::from(&bytes)))
 			},
+			PackageType::Handshake => {
+				let mut machine = [0u8; 4];
+				machine.copy_from_slice(bytes[..4].as_ref());
+				let machine1 = u32::from_ne_bytes(machine);
+				machine.copy_from_slice(bytes[4..8].as_ref());
+				let machine2 = u32::from_ne_bytes(machine);
+				machine.copy_from_slice(bytes[8..12].as_ref());
+				let machine3 = u32::from_ne_bytes(machine);
+				machine.copy_from_slice(bytes[12..].as_ref());
+				let machine4 = u32::from_ne_bytes(machine);
+				let message = Message::Machines(
+					MachineId {
+						machine1: machine1,
+						machine2: machine2,
+						machine3: machine3,
+						machine4: machine4
+					}
+				);
+				Some(message)
+			}
 			_ => None
 		}
 	}
@@ -296,6 +295,14 @@ impl Message {
 				bytes[..4].copy_from_slice(&(value.clone() as u32).to_ne_bytes());
 				bytes
 			},
+			Message::Machines(value) => {
+				let mut bytes = [0u8; 16];
+				bytes[..4].copy_from_slice(&value.machine1.to_ne_bytes());
+				bytes[4..8].copy_from_slice(&value.machine2.to_ne_bytes());
+				bytes[8..12].copy_from_slice(&value.machine3.to_ne_bytes());
+				bytes[12..16].copy_from_slice(&value.machine4.to_ne_bytes());
+				bytes
+			},
 		}
 	}
 }
@@ -308,13 +315,13 @@ pub struct Data {
 	pub package_type: Option<PackageType>,
 
 	// 4 bytes, layout: 4 - 7
-	pub id: u32,
+	pub id: i32,
 
 	// 4 bytes, layout: 8 - 11
-	pub src: Option<Id>,
+	pub src: u32,
 
 	// 4 bytes, layout: 12 - 15
-	pub dest: Option<Id>,
+	pub dest: u32,
 
 	// 16 byte union, layout: 16 - 31
 	// originally the developer used explicit layout on struct
@@ -322,14 +329,13 @@ pub struct Data {
 	pub message: Option<Message>,
 
 	// layout: 32 - 63
-	machine_name_p1: u64,
-	machine_name_p2: u64,
-	machine_name_p3: u64,
-	machine_name_p4: u64
+	// originally machine name was splited into 4 u64.
+	// but we can split it while convert to and from bytes
+	pub machine_name: Option<String>
 }
 
 impl Data {
-	pub fn from(bytes: &[u8; 64]) -> Self {
+	pub fn from(bytes: &[u8; 32]) -> Self {
 
 		let (package_type, rest) = bytes.split_first_chunk::<4>().unwrap();
 		let (id, rest) = rest.split_first_chunk::<4>().unwrap();
@@ -339,7 +345,7 @@ impl Data {
 
 		let mut data = Self::default();
 
-		let package_type = PackageType::try_from(u32::from_ne_bytes(package_type.to_owned()));
+		let package_type = PackageType::try_from(i32::from_ne_bytes(package_type.to_owned()));
 		if let Ok(package_type) = package_type {
 			data.package_type = Some(package_type);
 			data.message = Message::from(message.clone(), package_type);
@@ -347,29 +353,17 @@ impl Data {
 			data.message = None;
 		}
 
-		data.id = u32::from_ne_bytes(id.clone());
-		
-		let src = Id::try_from(u32::from_ne_bytes(src.clone()));
-		if let Ok(src) = src {
-			data.src = Some(src);
-		}
-
-		let dest = Id::try_from(u32::from_ne_bytes(dest.clone()));
-		if let Ok(dest) = dest {
-			data.dest = Some(dest);
-		}
-
-		let mut machine_name = [0u8; 8];
-		machine_name.copy_from_slice(bytes[32..40].as_ref());
-		data.machine_name_p1 = u64::from_ne_bytes(machine_name);
-		machine_name.copy_from_slice(bytes[40..48].as_ref());
-		data.machine_name_p2 = u64::from_ne_bytes(machine_name);
-		machine_name.copy_from_slice(bytes[48..56].as_ref());
-		data.machine_name_p3 = u64::from_ne_bytes(machine_name);
-		machine_name.copy_from_slice(bytes[56..].as_ref());
-		data.machine_name_p4 = u64::from_ne_bytes(machine_name);
+		data.id = i32::from_ne_bytes(id.clone());
+		data.src = u32::from_ne_bytes(src.clone());
+		data.dest = u32::from_ne_bytes(dest.clone());
 
 		data
+	}
+
+	pub fn update_machine_name(&mut self, machine_name: &[u8; 32]) {
+		if let Ok(machine_name) = String::from_utf8(machine_name[32..].into()) {
+			self.machine_name = Some(machine_name.trim().to_owned());
+		}
 	}
 
 	pub fn as_bytes(&self) -> [u8; 64] {
@@ -380,33 +374,62 @@ impl Data {
 		}
 		
 		bytes[4..8].copy_from_slice(&self.id.to_ne_bytes().as_ref());
-
-		if let Some(src) = self.src {
-			bytes[8..12].copy_from_slice(&(src as u32).to_ne_bytes().as_ref());
-		}
-
-		if let Some(dest) = self.dest {
-			bytes[12..16].copy_from_slice(&(dest as u32).to_ne_bytes().as_ref());
-		}
+		bytes[8..12].copy_from_slice(&self.src.to_ne_bytes().as_ref());
+		bytes[12..16].copy_from_slice(&self.dest.to_ne_bytes().as_ref());
 
 		if let Some(message) = self.message {
 			bytes[16..32].copy_from_slice(&message.as_bytes().as_ref());
 		}
 
-		bytes[32..40].copy_from_slice(self.machine_name_p1.to_ne_bytes().as_ref());
-		bytes[40..48].copy_from_slice(self.machine_name_p2.to_ne_bytes().as_ref());
-		bytes[48..56].copy_from_slice(self.machine_name_p3.to_ne_bytes().as_ref());
-		bytes[56..].copy_from_slice(self.machine_name_p4.to_ne_bytes().as_ref());
+		let mut name = String::new();
+		if let Some(machine_name) = self.machine_name.clone() {
+			name.push_str(machine_name.as_str());
+		}
+		name.push_str(" ".repeat(32).as_ref());
+		name.drain(32..);
+
+		bytes[32..].copy_from_slice(name.as_bytes());
 
 		bytes
 	}
 
-	pub fn machine_name(&self) -> Option<String> {
-		let Ok(machine_name_p1) = String::from_utf8(self.machine_name_p1.to_ne_bytes().into()) else { return None; };
-		let Ok(machine_name_p2) = String::from_utf8(self.machine_name_p2.to_ne_bytes().into()) else { return None; };
-		let Ok(machine_name_p3) = String::from_utf8(self.machine_name_p3.to_ne_bytes().into()) else { return None; };
-		let Ok(machine_name_p4) = String::from_utf8(self.machine_name_p4.to_ne_bytes().into()) else { return None; };
-		let mut machine_name = machine_name_p1 + machine_name_p2.as_ref() + machine_name_p3.as_ref() + machine_name_p4.as_ref();
-		Some(machine_name.trim().to_string())
+	pub fn is_big_package(&self) -> bool {
+		let Some(package_type) = self.package_type else { return false; };
+
+		match package_type {
+			PackageType::Hello | PackageType::Awake | PackageType::Heartbeat | PackageType::HeartbeatEx | PackageType::Handshake | PackageType::HandshakeAck |
+			PackageType::Clipboard | PackageType::ClipboardPush | PackageType::ClipboardAsk | PackageType::ClipboardImage | PackageType::ClipboardText | PackageType::ClipboardDataEnd => true,
+			_ => (package_type as u32) & (PackageType::Matrix as u32) == (PackageType::Matrix as u32),
+		}
 	}
+
+	// pub fn as_string(&self) -> String {
+	// 	let mut output = String::new();
+
+	// 	if let Some(package_type) = self.package_type {
+	// 		match package_type {
+				
+	// 		}
+	// 		bytes[..4].copy_from_slice(&(package_type as u32).to_ne_bytes().as_ref());
+	// 	}
+		
+	// 	bytes[4..8].copy_from_slice(&self.id.to_ne_bytes().as_ref());
+	// 	bytes[8..12].copy_from_slice(&self.src.to_ne_bytes().as_ref());
+	// 	bytes[12..16].copy_from_slice(&self.dest.to_ne_bytes().as_ref());
+
+	// 	if let Some(message) = self.message {
+	// 		bytes[16..32].copy_from_slice(&message.as_bytes().as_ref());
+	// 	}
+
+	// 	let mut name = String::new();
+	// 	if let Some(machine_name) = self.machine_name.clone() {
+	// 		name.push_str(machine_name.as_str());
+	// 	}
+	// 	name.push_str(" ".repeat(32).as_ref());
+	// 	name.drain(32..);
+
+	// 	bytes[32..].copy_from_slice(name.as_bytes());
+
+	// 	bytes
+	// }
 }

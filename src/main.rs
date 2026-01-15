@@ -3,31 +3,31 @@ mod structures;
 mod network;
 mod hashing;
 mod syscalls;
+mod logger;
+
+use std::thread;
+use std::sync::*;
+use std::cell::*;
+use std::rc::Rc;
 
 use structures::*;
 use network::*;
+use syscalls::*;
 use hashing::Hasher;
 
+static STATS: LazyLock<Arc<RwLock<Stats>>> = LazyLock::new(|| Arc::new(RwLock::new(Stats::default())));
+static CONFIG: LazyLock<Arc<RwLock<Config>>> = LazyLock::new(|| Arc::new(RwLock::new(Config::default())));
+static MATRIX: LazyLock<Arc<RwLock<Vec<MachineInfo>>>> = LazyLock::new(|| Arc::new(RwLock::new(Vec::new())));
+
 fn main() {
-    let mut config = Config::default();
-    let mut hasher = Hasher::from(String::from("asdfasdfasdfasdf"));
-    start_listening(&mut config, &mut hasher);
+    configure();
+    start_listening();
 }
 
-/*
-flow of the application
-    get username
-    get encrypted passwd
-    get screen configuration
-    initialize the package monitor for sent and received packages
-    setup machines and ids
-        initialize machine pool
-        learn machine
-        try and update machine id
-        update machine pool string setting
-    initialize encryption
-        create aes256 hasher
- 
-network stuff
-    receiving 64 bytes of data at once, which mean data being sent is the same
-*/
+fn configure() {
+    if let Ok(mut config) = CONFIG.write() {
+        config.user_name = get_user_name();
+        config.machine_id = rand::random();
+        config.key = String::from("asdfasdfasdfasdf");
+    }
+}
