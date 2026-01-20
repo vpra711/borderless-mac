@@ -4,6 +4,7 @@ mod network;
 mod hashing;
 mod syscalls;
 mod logger;
+mod threadpool;
 
 use std::thread;
 use std::sync::*;
@@ -14,14 +15,17 @@ use structures::*;
 use network::*;
 use syscalls::*;
 use hashing::Hasher;
+use threadpool::*;
 
 static STATS: LazyLock<Arc<RwLock<Stats>>> = LazyLock::new(|| Arc::new(RwLock::new(Stats::default())));
 static CONFIG: LazyLock<Arc<RwLock<Config>>> = LazyLock::new(|| Arc::new(RwLock::new(Config::default())));
 static MATRIX: LazyLock<Arc<RwLock<Vec<MachineInfo>>>> = LazyLock::new(|| Arc::new(RwLock::new(Vec::new())));
+static THREADPOOL: LazyLock<Arc<RwLock<Threadpool>>> = LazyLock::new(|| Arc::new(RwLock::new(Threadpool::new(10))));
 
 fn main() {
     configure();
     start_listening();
+    loop {}
 }
 
 fn configure() {

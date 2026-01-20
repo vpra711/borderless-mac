@@ -5,6 +5,7 @@ use crate::syscalls::*;
 use crate::logger::*;
 
 use crate::CONFIG;
+use crate::THREADPOOL;
 
 use std::io::Read;
 use std::io::Write;
@@ -25,7 +26,12 @@ pub fn start_listening() {
     let message_listener = TcpListener::bind(&message_server);
     let clipboard_listener = TcpListener::bind(&clipboard_server);
 
-    let message_server_thread = thread::spawn(|| {
+    let Ok(threadpool) = THREADPOOL.read() else {
+        eprintln!("error: cannot use threadpool");
+        return
+    };
+
+    threadpool.execute(|| {
         let Ok(message_streams) = message_listener else {
             eprintln!("error: unable to bind to message port: 15101");
             return
@@ -38,13 +44,21 @@ pub fn start_listening() {
             };
             println!("info: new incomming tcp message connection accepted and listening...");
             stream.set_nodelay(true);
-            if let Some(mut hasher) = create_hasher(&mut stream) {
-                handle_message_stream(&mut stream, &mut hasher);
-            }
+            let Some(mut hasher) = create_hasher(&mut stream) else {
+                eprintln!("error: hasher cannot be created");
+                return
+            };
+            let Ok(threadpool) = THREADPOOL.read() else {
+                eprintln!("error: cannot use threadpool");
+                return
+            };
+            threadpool.execute(|| {
+                handle_message_stream(stream, hasher);
+            });
         }
     });
 
-    let clipboard_server_thread = thread::spawn(|| {
+    threadpool.execute(|| {
         let Ok(clipboard_streams) = clipboard_listener else {
             eprintln!("error: unable to bind to clipboard port: 15100");
             return
@@ -60,9 +74,6 @@ pub fn start_listening() {
             println!("info: clipboard functionality not yet implemented...");
         }
     });
-
-    message_server_thread.join();
-    clipboard_server_thread.join();
 }
 
 pub fn create_hasher(stream: &mut TcpStream) -> Option<Hasher> {
@@ -83,17 +94,17 @@ pub fn create_hasher(stream: &mut TcpStream) -> Option<Hasher> {
     Some(hasher)
 }
 
-pub fn handle_message_stream(stream: &mut TcpStream, hasher: &mut Hasher) {
+pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
     let mut received_package_count = 0;
     let mut error_package_count = 0;
     let mut received_handshake_package = MachineId::default();
     loop {
-        let mut data = tcp_read(stream, hasher);
+        let mut data = tcp_read(&mut stream, &mut hasher);
         let Some(package_type) = data.package_type else {
             eprintln!("error: package has no type - unable to interpret the data");
             data.package_type = Some(PackageType::Invalid);
             for _ in 0..10 {
-                tcp_write(stream, hasher, &mut data);
+                tcp_write(&mut stream, &mut hasher, &mut data);
             }
             stream.shutdown(Shutdown::Both);
             return
@@ -119,7 +130,7 @@ pub fn handle_message_stream(stream: &mut TcpStream, hasher: &mut Hasher) {
                     received_handshake_package = values;
                 }
             }
-            perform_handshake(stream, hasher, &mut data);
+            perform_handshake(&mut stream, &mut hasher, &mut data);
             continue
         }
 
@@ -130,7 +141,7 @@ pub fn handle_message_stream(stream: &mut TcpStream, hasher: &mut Hasher) {
                 eprintln!("error: closing socket due to high volume of invalid packages");
                 data.package_type = Some(PackageType::Invalid);
                 for _ in 0..10 {
-                    tcp_write(stream, hasher, &mut data);
+                    tcp_write(&mut stream, &mut hasher, &mut data);
                 }
                 stream.shutdown(Shutdown::Both);
                 return
