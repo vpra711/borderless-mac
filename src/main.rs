@@ -17,6 +17,8 @@ use syscalls::*;
 use hashing::Hasher;
 use threadpool::*;
 
+use std::net::SocketAddr;
+
 static STATS: LazyLock<Arc<RwLock<Stats>>> = LazyLock::new(|| Arc::new(RwLock::new(Stats::default())));
 static CONFIG: LazyLock<Arc<RwLock<Config>>> = LazyLock::new(|| Arc::new(RwLock::new(Config::default())));
 static MATRIX: LazyLock<Arc<RwLock<Vec<MachineInfo>>>> = LazyLock::new(|| Arc::new(RwLock::new(Vec::new())));
@@ -32,6 +34,6 @@ fn configure() {
     if let Ok(mut config) = CONFIG.write() {
         config.user_name = get_user_name();
         config.machine_id = rand::random();
-        config.key = String::from("asdfasdfasdfasdf");
+        config.key = String::from("mnopmnopmnopmnop");
     }
 }

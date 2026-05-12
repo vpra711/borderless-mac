@@ -1,5 +1,6 @@
 use crate::Hasher;
 use std::net::TcpStream;
+use std::net::SocketAddr;
 
 #[derive(Default, Debug)]
 pub struct MouseLocation {
@@ -28,7 +29,15 @@ pub struct Config {
     pub user_name               : String,
     pub machine_name            : String, // INFO: also referred as hostname
     pub machine_id: u32,
-    pub key: String,
+    pub key: String
+}
+
+impl Config {
+	pub fn get_machine_name(&self) -> [u8; 32] {
+		let mut machine_name = self.machine_name.clone();
+		machine_name.push_str(" ".repeat(32).as_str());
+		return machine_name.as_bytes().first_chunk::<32>().unwrap().clone();
+	}
 }
 
 #[derive(Default, Debug)]
@@ -64,8 +73,31 @@ pub enum SocketStatus {
 	Disconnected
 }
 
+#[derive(Debug)]
+pub struct Machine {
+	// host name of the machine
+    pub name: String,
+    // machine address can change frequently
+    pub address: SocketAddr,
+    pub id: u32
+}
+
+#[derive(Debug)]
+pub struct Connection {
+    pub machine: Machine,
+    pub hasher: Hasher,
+    pub stream: TcpStream,
+    pub is_client: bool
+}
+
+impl Connection {
+	// fn new(is_client: bool) -> Connection {
+	
+	// }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum PackageType {
     Invalid = 0xFF,
     Error = 0xFE,
@@ -97,46 +129,45 @@ pub enum PackageType {
     Handshake = 126,
     HandshakeAck = 127,
     Matrix = 128,
+    Unknown = 0
     // matrixSwapFlag = 2,
     // matrixTwoRowFlag = 4,
 }
 
-impl TryFrom<i32> for PackageType {
-	type Error = &'static str;
-
-	fn try_from(value: i32) -> Result<PackageType, <PackageType as TryFrom<i32>>::Error> {
+impl PackageType {
+	fn try_from(value: i32) -> PackageType {
 		match value {
-		    0xFF => Ok(PackageType::Invalid), 
-		    0xFE => Ok(PackageType::Error), 
-		    2    => Ok(PackageType::Hi), 
-		    3    => Ok(PackageType::Hello), 
-		    4    => Ok(PackageType::ByeBye), 
-		    20   => Ok(PackageType::Heartbeat), 
-		    21   => Ok(PackageType::Awake), 
-		    50   => Ok(PackageType::HideMouse), 
-		    51   => Ok(PackageType::HeartbeatEx), 
-		    52   => Ok(PackageType::HeartbeatExL2), 
-		    53   => Ok(PackageType::HeartbeatExL3), 
-		    69   => Ok(PackageType::Clipboard), 
-		    70   => Ok(PackageType::ClipboardDragDrop), 
-		    71   => Ok(PackageType::ClipboardDragDropEnd), 
-		    72   => Ok(PackageType::ExplorerDragDrop), 
-		    73   => Ok(PackageType::ClipboardCapture), 
-		    74   => Ok(PackageType::CaptureScreenCommand), 
-		    75   => Ok(PackageType::ClipboardDragDropOperation), 
-		    76   => Ok(PackageType::ClipboardDataEnd), 
-		    77   => Ok(PackageType::MachineSwitched), 
-		    78   => Ok(PackageType::ClipboardAsk), 
-		    79   => Ok(PackageType::ClipboardPush), 
-		    121  => Ok(PackageType::NextMachine), 
-		    122  => Ok(PackageType::Keyboard), 
-		    123  => Ok(PackageType::Mouse), 
-		    124  => Ok(PackageType::ClipboardText), 
-		    125  => Ok(PackageType::ClipboardImage), 
-		    126  => Ok(PackageType::Handshake), 
-		    127  => Ok(PackageType::HandshakeAck), 
-		    128  => Ok(PackageType::Matrix), 
-		    _    => Err("unknown value")
+		    0xFF => PackageType::Invalid, 
+		    0xFE => PackageType::Error, 
+		    2    => PackageType::Hi, 
+		    3    => PackageType::Hello, 
+		    4    => PackageType::ByeBye, 
+		    20   => PackageType::Heartbeat, 
+		    21   => PackageType::Awake, 
+		    50   => PackageType::HideMouse, 
+		    51   => PackageType::HeartbeatEx, 
+		    52   => PackageType::HeartbeatExL2, 
+		    53   => PackageType::HeartbeatExL3, 
+		    69   => PackageType::Clipboard, 
+		    70   => PackageType::ClipboardDragDrop, 
+		    71   => PackageType::ClipboardDragDropEnd, 
+		    72   => PackageType::ExplorerDragDrop, 
+		    73   => PackageType::ClipboardCapture, 
+		    74   => PackageType::CaptureScreenCommand, 
+		    75   => PackageType::ClipboardDragDropOperation, 
+		    76   => PackageType::ClipboardDataEnd, 
+		    77   => PackageType::MachineSwitched, 
+		    78   => PackageType::ClipboardAsk, 
+		    79   => PackageType::ClipboardPush, 
+		    121  => PackageType::NextMachine, 
+		    122  => PackageType::Keyboard, 
+		    123  => PackageType::Mouse, 
+		    124  => PackageType::ClipboardText, 
+		    125  => PackageType::ClipboardImage, 
+		    126  => PackageType::Handshake, 
+		    127  => PackageType::HandshakeAck, 
+		    128  => PackageType::Matrix, 
+		    _    => PackageType::Unknown
 	    }
  	}
 }
@@ -312,7 +343,7 @@ impl Message {
 pub struct Data {
 	// 4 bytes, layout: 0 - 3
 	// byte0 = package type, byte1 = checksum, byte2 + byte3 = magic number
-	pub package_type: Option<PackageType>,
+	pub package_type: PackageType,
 
 	// 4 bytes, layout: 4 - 7
 	pub id: i32,
@@ -346,11 +377,11 @@ impl Data {
 		let mut data = Self::default();
 
 		let package_type = PackageType::try_from(i32::from_ne_bytes(package_type.to_owned()));
-		if let Ok(package_type) = package_type {
-			data.package_type = Some(package_type);
-			data.message = Message::from(message.clone(), package_type);
-		} else {
+		if package_type == PackageType::Unknown {
 			data.message = None;
+		} else {
+			data.package_type = package_type;
+			data.message = Message::from(message.clone(), package_type);
 		}
 
 		data.id = i32::from_ne_bytes(id.clone());
@@ -369,9 +400,7 @@ impl Data {
 	pub fn as_bytes(&self) -> [u8; 64] {
 		let mut bytes = [0u8; 64];
 
-		if let Some(package_type) = self.package_type {
-			bytes[..4].copy_from_slice(&(package_type as u32).to_ne_bytes().as_ref());
-		}
+		bytes[..4].copy_from_slice(&(self.package_type as u32).to_ne_bytes().as_ref());
 		
 		bytes[4..8].copy_from_slice(&self.id.to_ne_bytes().as_ref());
 		bytes[8..12].copy_from_slice(&self.src.to_ne_bytes().as_ref());
@@ -394,12 +423,10 @@ impl Data {
 	}
 
 	pub fn is_big_package(&self) -> bool {
-		let Some(package_type) = self.package_type else { return false; };
-
-		match package_type {
+		match self.package_type {
 			PackageType::Hello | PackageType::Awake | PackageType::Heartbeat | PackageType::HeartbeatEx | PackageType::Handshake | PackageType::HandshakeAck |
 			PackageType::Clipboard | PackageType::ClipboardPush | PackageType::ClipboardAsk | PackageType::ClipboardImage | PackageType::ClipboardText | PackageType::ClipboardDataEnd => true,
-			_ => (package_type as u32) & (PackageType::Matrix as u32) == (PackageType::Matrix as u32),
+			_ => (self.package_type as u32) & (PackageType::Matrix as u32) == (PackageType::Matrix as u32),
 		}
 	}
 

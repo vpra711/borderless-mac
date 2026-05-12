@@ -19,11 +19,20 @@ use std::net::{
 use std::thread;
 use std::thread_local;
 
+pub fn startServer() {
+    
+}
+
+pub fn newClientThread() {
+    
+}
+
 pub fn start_listening() {
 
     let message_server = SocketAddr::from(([0, 0, 0, 0], 15101));
     let clipboard_server = SocketAddr::from(([0, 0, 0, 0], 15100));
     let message_listener = TcpListener::bind(&message_server);
+    let message_listener = TcpListener::bind("[::]:15101");
     let clipboard_listener = TcpListener::bind(&clipboard_server);
 
     let Ok(threadpool) = THREADPOOL.read() else {
@@ -100,17 +109,17 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
     let mut received_handshake_package = MachineId::default();
     loop {
         let mut data = tcp_read(&mut stream, &mut hasher);
-        let Some(package_type) = data.package_type else {
+        if data.package_type  == PackageType::Invalid {
             eprintln!("error: package has no type - unable to interpret the data");
-            data.package_type = Some(PackageType::Invalid);
             for _ in 0..10 {
                 tcp_write(&mut stream, &mut hasher, &mut data);
             }
             stream.shutdown(Shutdown::Both);
             return
         };
+        println!("info: receive: {:?}", data.package_type);
 
-        if package_type == PackageType::Error {
+        if data.package_type == PackageType::Error {
             error_package_count += 1;
             if received_package_count > 0 {
                 println!("info: received an invalid package. check the security keys");
@@ -124,7 +133,7 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
         }
         error_package_count = 0;
 
-        if package_type == PackageType::Handshake {
+        if data.package_type == PackageType::Handshake {
             if let Some(machines) = data.message {
                 if let Message::Machines(values) = machines {
                     received_handshake_package = values;
@@ -139,7 +148,7 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
             received_package_count += 1;
             if received_package_count > 9 {
                 eprintln!("error: closing socket due to high volume of invalid packages");
-                data.package_type = Some(PackageType::Invalid);
+                data.package_type = PackageType::Invalid;
                 for _ in 0..10 {
                     tcp_write(&mut stream, &mut hasher, &mut data);
                 }
@@ -147,7 +156,7 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
                 return
             }
 
-            match package_type {
+            match data.package_type {
                 PackageType::HandshakeAck => {
                     let Some(machines) = data.message else {
                         println!("info: error invalid handshake data received");
@@ -162,6 +171,8 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
                         !values.machine3 == received_handshake_package.machine3 &&
                         !values.machine4 == received_handshake_package.machine4 {
                         received_package_count = -1;
+                        data.package_type = PackageType::HeartbeatEx;
+                        tcp_write(&mut stream, &mut hasher, &mut data);
                     } else {
                         println!("info: error invalid handshake data received");
                         break
@@ -185,7 +196,7 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
         }
 
         // main decision making
-        match package_type {
+        match data.package_type {
             PackageType::Handshake => {
                 eprintln!("error: handshake at this point should not be possible");
             },
@@ -225,6 +236,7 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
             PackageType::ClipboardText => { println!("packageType = ClipboardText ")},
             PackageType::ClipboardImage => { println!("packageType = ClipboardImage ")},
             PackageType::Matrix => { println!("packageType = Matrix ")},
+            PackageType::Unknown => { println!("packageType = Unknown")}
         }
     }
 }
@@ -237,7 +249,7 @@ pub fn tcp_read(stream: &mut TcpStream, hasher: &mut Hasher) -> Data {
     if let Err(error) = stream.read_exact(&mut message) {
         eprintln!("error: error reading the first 32 bytes");
         eprintln!("{}", error);
-        data.package_type = Some(PackageType::Error);
+        data.package_type = PackageType::Error;
         return data;
     }
     hasher.decrypt_data(&mut message);
@@ -247,7 +259,7 @@ pub fn tcp_read(stream: &mut TcpStream, hasher: &mut Hasher) -> Data {
         if let Err(error) = stream.read_exact(&mut machine_name) {
             eprintln!("error: big package received - error reading the remaining bytes");
             eprintln!("{}", error);
-            data.package_type = Some(PackageType::Error);
+            data.package_type = PackageType::Error;
             return data;
         }
         hasher.decrypt_data(&mut machine_name);
@@ -257,6 +269,7 @@ pub fn tcp_read(stream: &mut TcpStream, hasher: &mut Hasher) -> Data {
 }
 
 pub fn tcp_write(stream: &mut TcpStream, hasher: &mut Hasher, data: &mut Data) {
+    println!("info: send: {:?}", data.package_type);
     // preprocess_data(data);
     if data.src == 0 && let Ok(config) = CONFIG.read() {
         data.src = config.machine_id;
@@ -273,13 +286,11 @@ pub fn tcp_write(stream: &mut TcpStream, hasher: &mut Hasher, data: &mut Data) {
 }
 
 pub fn preprocess_data(data: &Data) {
-    let Some(package_type) = data.package_type else { return };
     let Ok(mut config) = CONFIG.write() else { return };
 }
 
 pub fn perform_handshake(stream: &mut TcpStream, hasher: &mut Hasher, data: &mut Data) {
-    println!("info: handshake");
-    data.package_type = Some(PackageType::HandshakeAck);
+    data.package_type = PackageType::HandshakeAck;
     data.src = 0;
     if let Ok(mut config) = CONFIG.read() {
         data.machine_name = Some(config.machine_name.clone());
