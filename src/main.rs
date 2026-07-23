@@ -27,13 +27,13 @@ static THREADPOOL: LazyLock<Arc<RwLock<Threadpool>>> = LazyLock::new(|| Arc::new
 fn main() {
     configure();
     start_listening();
-    loop {}
 }
 
 fn configure() {
     if let Ok(mut config) = CONFIG.write() {
         config.user_name = get_user_name();
         config.machine_id = rand::random();
+        config.machine_name = get_host_name();
         config.key = String::from("mnopmnopmnopmnop");
     }
 }

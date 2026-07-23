@@ -7,6 +7,7 @@ use crate::logger::*;
 use crate::CONFIG;
 use crate::THREADPOOL;
 
+use std::sync::mpsc::channel;
 use std::io::Read;
 use std::io::Write;
 use std::net::Ipv4Addr;
@@ -20,54 +21,42 @@ use std::thread;
 use std::thread_local;
 
 pub fn startServer() {
-    
+
 }
 
 pub fn newClientThread() {
-    
+
 }
 
 pub fn start_listening() {
 
-    let message_server = SocketAddr::from(([0, 0, 0, 0], 15101));
-    let clipboard_server = SocketAddr::from(([0, 0, 0, 0], 15100));
-    let message_listener = TcpListener::bind(&message_server);
+    let (sender, receiver) = channel();
+
     let message_listener = TcpListener::bind("[::]:15101");
-    let clipboard_listener = TcpListener::bind(&clipboard_server);
+    let clipboard_listener = TcpListener::bind("[::]:15100");
 
     let Ok(threadpool) = THREADPOOL.read() else {
         eprintln!("error: cannot use threadpool");
         return
     };
 
-    threadpool.execute(|| {
+    let sender_clone = sender.clone();
+    threadpool.execute(move || {
         let Ok(message_streams) = message_listener else {
             eprintln!("error: unable to bind to message port: 15101");
             return
         };
         println!("info: listening on port: 15101");
-        for streams in message_streams.incoming() {
+       for streams in message_streams.incoming() {
             let Ok(mut stream) = streams else {
                 eprintln!("error: new tcp incomming message connction rejected");
                 return
             };
-            println!("info: new incomming tcp message connection accepted and listening...");
-            stream.set_nodelay(true);
-            let Some(mut hasher) = create_hasher(&mut stream) else {
-                eprintln!("error: hasher cannot be created");
-                return
-            };
-            let Ok(threadpool) = THREADPOOL.read() else {
-                eprintln!("error: cannot use threadpool");
-                return
-            };
-            threadpool.execute(|| {
-                handle_message_stream(stream, hasher);
-            });
+            sender_clone.send(stream);
         }
     });
 
-    threadpool.execute(|| {
+    threadpool.execute(move || {
         let Ok(clipboard_streams) = clipboard_listener else {
             eprintln!("error: unable to bind to clipboard port: 15100");
             return
@@ -78,11 +67,19 @@ pub fn start_listening() {
                 eprintln!("error: new tcp incomming clipboard connction rejected");
                 return
             };
-            stream.set_nodelay(true);
-            println!("info: new incomming tcp clipboard connection accepted and listening...");
-            println!("info: clipboard functionality not yet implemented...");
+            sender.send(stream);
         }
     });
+
+    while let Ok(mut stream) = receiver.recv() {
+        stream.set_nodelay(true);
+        println!("info: new incomming tcp clipboard connection accepted and listening...");
+        let Some(mut hasher) = create_hasher(&mut stream) else {
+            eprintln!("error: hasher cannot be created");
+            return
+        };
+        handle_message_stream(stream, hasher);
+    }
 }
 
 pub fn create_hasher(stream: &mut TcpStream) -> Option<Hasher> {
@@ -107,6 +104,23 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
     let mut received_package_count = 0;
     let mut error_package_count = 0;
     let mut received_handshake_package = MachineId::default();
+    // TODO: set timout
+
+    let mut data = Data::empty();
+    {
+        let Ok(config) = CONFIG.read() else {
+            eprintln!("error: unable to lock n read the CONFIG - required machine name to send");
+            return
+        };
+        data.machine_name = Some(config.machine_name.clone());
+    }
+
+    for _ in 0..10 {
+        tcp_write(&mut stream, &mut hasher, &mut data);
+    }
+
+    data.invert_machine_name();
+
     loop {
         let mut data = tcp_read(&mut stream, &mut hasher);
         if data.package_type  == PackageType::Invalid {
@@ -186,7 +200,7 @@ pub fn handle_message_stream(mut stream: TcpStream, mut hasher: Hasher) {
                 _ => {
                     if received_package_count > 5 {
                         // TODO: update the machine socket status to invalid key
-                        
+
                     } else {
                         println!("info: unexpected package");
                     }

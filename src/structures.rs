@@ -92,7 +92,7 @@ pub struct Connection {
 
 impl Connection {
 	// fn new(is_client: bool) -> Connection {
-	
+
 	// }
 }
 
@@ -137,36 +137,36 @@ pub enum PackageType {
 impl PackageType {
 	fn try_from(value: i32) -> PackageType {
 		match value {
-		    0xFF => PackageType::Invalid, 
-		    0xFE => PackageType::Error, 
-		    2    => PackageType::Hi, 
-		    3    => PackageType::Hello, 
-		    4    => PackageType::ByeBye, 
-		    20   => PackageType::Heartbeat, 
-		    21   => PackageType::Awake, 
-		    50   => PackageType::HideMouse, 
-		    51   => PackageType::HeartbeatEx, 
-		    52   => PackageType::HeartbeatExL2, 
-		    53   => PackageType::HeartbeatExL3, 
-		    69   => PackageType::Clipboard, 
-		    70   => PackageType::ClipboardDragDrop, 
-		    71   => PackageType::ClipboardDragDropEnd, 
-		    72   => PackageType::ExplorerDragDrop, 
-		    73   => PackageType::ClipboardCapture, 
-		    74   => PackageType::CaptureScreenCommand, 
-		    75   => PackageType::ClipboardDragDropOperation, 
-		    76   => PackageType::ClipboardDataEnd, 
-		    77   => PackageType::MachineSwitched, 
-		    78   => PackageType::ClipboardAsk, 
-		    79   => PackageType::ClipboardPush, 
-		    121  => PackageType::NextMachine, 
-		    122  => PackageType::Keyboard, 
-		    123  => PackageType::Mouse, 
-		    124  => PackageType::ClipboardText, 
-		    125  => PackageType::ClipboardImage, 
-		    126  => PackageType::Handshake, 
-		    127  => PackageType::HandshakeAck, 
-		    128  => PackageType::Matrix, 
+		    0xFF => PackageType::Invalid,
+		    0xFE => PackageType::Error,
+		    2    => PackageType::Hi,
+		    3    => PackageType::Hello,
+		    4    => PackageType::ByeBye,
+		    20   => PackageType::Heartbeat,
+		    21   => PackageType::Awake,
+		    50   => PackageType::HideMouse,
+		    51   => PackageType::HeartbeatEx,
+		    52   => PackageType::HeartbeatExL2,
+		    53   => PackageType::HeartbeatExL3,
+		    69   => PackageType::Clipboard,
+		    70   => PackageType::ClipboardDragDrop,
+		    71   => PackageType::ClipboardDragDropEnd,
+		    72   => PackageType::ExplorerDragDrop,
+		    73   => PackageType::ClipboardCapture,
+		    74   => PackageType::CaptureScreenCommand,
+		    75   => PackageType::ClipboardDragDropOperation,
+		    76   => PackageType::ClipboardDataEnd,
+		    77   => PackageType::MachineSwitched,
+		    78   => PackageType::ClipboardAsk,
+		    79   => PackageType::ClipboardPush,
+		    121  => PackageType::NextMachine,
+		    122  => PackageType::Keyboard,
+		    123  => PackageType::Mouse,
+		    124  => PackageType::ClipboardText,
+		    125  => PackageType::ClipboardImage,
+		    126  => PackageType::Handshake,
+		    127  => PackageType::HandshakeAck,
+		    128  => PackageType::Matrix,
 		    _    => PackageType::Unknown
 	    }
  	}
@@ -255,6 +255,15 @@ pub struct MachineId {
 	pub machine2: u32,
 	pub machine3: u32,
 	pub machine4: u32,
+}
+
+impl MachineId {
+	pub fn invert(&mut self) {
+		self.machine1 = !self.machine1;
+		self.machine2 = !self.machine2;
+		self.machine3 = !self.machine3;
+		self.machine4 = !self.machine4;
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -366,6 +375,17 @@ pub struct Data {
 }
 
 impl Data {
+	pub fn empty() -> Self {
+		Data {
+			package_type: PackageType::Handshake,
+			id: 0,
+			src: 0,
+			dest: 0,
+			message: None,
+			machine_name: None,
+		}
+	}
+
 	pub fn from(bytes: &[u8; 32]) -> Self {
 
 		let (package_type, rest) = bytes.split_first_chunk::<4>().unwrap();
@@ -401,7 +421,7 @@ impl Data {
 		let mut bytes = [0u8; 64];
 
 		bytes[..4].copy_from_slice(&(self.package_type as u32).to_ne_bytes().as_ref());
-		
+
 		bytes[4..8].copy_from_slice(&self.id.to_ne_bytes().as_ref());
 		bytes[8..12].copy_from_slice(&self.src.to_ne_bytes().as_ref());
 		bytes[12..16].copy_from_slice(&self.dest.to_ne_bytes().as_ref());
@@ -430,16 +450,23 @@ impl Data {
 		}
 	}
 
+	pub fn invert_machine_name(&mut self) {
+		let Some(Message::Machines(machines)) = &mut self.message else {
+			return
+		};
+		machines.invert();
+	}
+
 	// pub fn as_string(&self) -> String {
 	// 	let mut output = String::new();
 
 	// 	if let Some(package_type) = self.package_type {
 	// 		match package_type {
-				
+
 	// 		}
 	// 		bytes[..4].copy_from_slice(&(package_type as u32).to_ne_bytes().as_ref());
 	// 	}
-		
+
 	// 	bytes[4..8].copy_from_slice(&self.id.to_ne_bytes().as_ref());
 	// 	bytes[8..12].copy_from_slice(&self.src.to_ne_bytes().as_ref());
 	// 	bytes[12..16].copy_from_slice(&self.dest.to_ne_bytes().as_ref());
